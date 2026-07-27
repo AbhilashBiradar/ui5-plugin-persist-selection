@@ -1,0 +1,38 @@
+{
+  "name": "ui5-plugin-persist-selection",
+  "version": "1.0.0",
+  "description": "SAP UI5 table plugin that preserves row selections across sort and filter operations",
+  "main": "src/PersistSelectionPlugin.js",
+  "keywords": [
+    "ui5",
+    "sapui5",
+    "openui5",
+    "sap",
+    "table",
+    "selection",
+    "plugin",
+    "fiori"
+  ],
+  "author": "Abhilash Biradar",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AbhilashBiradar/ui5-plugin-persist-selection.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AbhilashBiradar/ui5-plugin-persist-selection/issues"
+  },
+  "homepage": "https://github.com/AbhilashBiradar/ui5-plugin-persist-selection#readme",
+  "files": [
+    "src/",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@openui5/sap.ui.table": ">=1.64.0",
+    "@sapui5/sap.ui.table": ">=1.64.0"
+  },
+  "peerDependenciesMeta": {
+    "@openui5/sap.ui.table": { "optional": true },
+    "@sapui5/sap.ui.table": { "optional": true }
+  }
+}
