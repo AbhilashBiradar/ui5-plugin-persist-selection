@@ -8,9 +8,12 @@
  */
 sap.ui.define([
     "sap/ui/table/plugins/SelectionPlugin",
-    "sap/ui/table/utils/TableUtils"
-], function (SelectionPlugin, TableUtils) {
+    "sap/ui/table/utils/TableUtils",
+    "sap/base/Log"
+], function (SelectionPlugin, TableUtils, Log) {
     "use strict";
+
+    const LOGGER = "com.abhilashbiradar.PersistSelectionPlugin";
 
     /**
      * @class PersistSelectionPlugin
@@ -24,10 +27,16 @@ sap.ui.define([
      * stores the binding context path of each selected row and re-resolves
      * selections after the binding refreshes — keeping selections stable.
      *
-     * @extends sap.ui.table.plugins.SelectionPlugin
-     * @since 1.64.0
+     * NOTE: Context-path-based persistence works reliably with OData models where
+     * paths are entity-key-based (e.g. /Products(1)). For JSON models, paths are
+     * index-based (/Products/0) and will shift after filter — a warning is logged
+     * and the plugin falls back to index-based behaviour in that case.
      *
-     * Usage:
+     * @extends sap.ui.table.plugins.SelectionPlugin
+     * @since UI5 1.64.0
+     *
+     * @example
+     *   // Attach to table (preferred since UI5 1.120):
      *   oTable.addDependent(new PersistSelectionPlugin());
      *
      * @author Abhilash Biradar
@@ -39,7 +48,7 @@ sap.ui.define([
                 library: "com.abhilashbiradar",
                 properties: {
                     /**
-                     * Selection mode. Only MultiToggle and Single are supported.
+                     * Selection mode. MultiToggle or Single.
                      * @type {sap.ui.table.SelectionMode}
                      */
                     selectionMode: {
@@ -48,7 +57,7 @@ sap.ui.define([
                     },
                     /**
                      * Maximum number of rows that can be selected simultaneously.
-                     * 0 means unlimited.
+                     * 0 = unlimited.
                      * @type {int}
                      */
                     limit: {
@@ -59,15 +68,20 @@ sap.ui.define([
                 events: {
                     /**
                      * Fired when the selection changes.
-                     * @param {string[]} contextPaths - Binding context paths of all selected rows
-                     * @param {int[]} rowIndices - Current row indices of selected rows (may change after sort/filter)
-                     * @param {string} trigger - What triggered the change: "user" | "sortFilter"
+                     *
+                     * @param {string[]} contextPaths - Binding context paths of selected rows.
+                     *   Stable across sort/filter for OData models.
+                     * @param {int[]} rowIndices - Current visible row indices of selected rows.
+                     *   Only includes rows visible in the current scroll position.
+                     * @param {string} trigger - "user" | "sortFilter" | "programmatic"
+                     * @param {boolean} limitReached - true if selection was blocked by the limit
                      */
                     selectionChange: {
                         parameters: {
                             contextPaths: { type: "string[]" },
                             rowIndices:   { type: "int[]" },
-                            trigger:      { type: "string" }
+                            trigger:      { type: "string" },
+                            limitReached: { type: "boolean" }
                         }
                     }
                 }
@@ -75,24 +89,22 @@ sap.ui.define([
         }
     );
 
-    // Inherit the static findOn lookup so consumers can call:
+    // Allow consumers to find the plugin on a table:
     // PersistSelectionPlugin.findOn(oTable)
     PersistSelectionPlugin.findOn = SelectionPlugin.findOn;
-
-    // ─── Internal state ───────────────────────────────────────────────────────
-
-    /**
-     * Set of binding context paths that are currently selected.
-     * Using context paths (not indices) means selections survive sort/filter.
-     * @type {Set<string>}
-     */
-    PersistSelectionPlugin.prototype._oSelectedPaths = null;
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     PersistSelectionPlugin.prototype.init = function () {
         SelectionPlugin.prototype.init.apply(this, arguments);
+        // Set of binding context paths currently selected.
+        // Using paths (not indices) keeps selections valid after sort/filter.
         this._oSelectedPaths = new Set();
+        // Whether a sort/filter is pending — used to re-fire selectionChange
+        // after rows actually update (via UpdateRows hook, not setTimeout).
+        this._bPendingSortFilterNotify = false;
+        // Whether the bound model is JSON — if so warn about limitations.
+        this._bIsJsonModel = false;
     };
 
     PersistSelectionPlugin.prototype.onActivate = function (oTable) {
@@ -100,7 +112,7 @@ sap.ui.define([
 
         oTable.setProperty("selectionMode", this.getSelectionMode());
 
-        // Listen for binding attachment so we can hook into sort/filter events
+        // RowsBound: fired after binding object is created (table re-bound)
         TableUtils.Hook.register(
             oTable,
             TableUtils.Hook.Keys.Table.RowsBound,
@@ -108,6 +120,7 @@ sap.ui.define([
             this
         );
 
+        // RowsUnbound: fired when rows are unbound (not caused by rebind/destroy)
         TableUtils.Hook.register(
             oTable,
             TableUtils.Hook.Keys.Table.RowsUnbound,
@@ -115,10 +128,19 @@ sap.ui.define([
             this
         );
 
-        // Attach to existing binding if table already has one
+        // UpdateRows: fired after rows have actually re-rendered.
+        // Used to re-notify consumers after sort/filter (replaces fragile setTimeout).
+        TableUtils.Hook.register(
+            oTable,
+            TableUtils.Hook.Keys.Table.UpdateRows,
+            this._onUpdateRows,
+            this
+        );
+
+        // Attach to existing binding if table is already bound
         const oBinding = oTable.getBinding("rows");
         if (oBinding) {
-            this._attachBinding(oBinding);
+            this._attachBinding(oTable, oBinding);
         }
     };
 
@@ -128,17 +150,13 @@ sap.ui.define([
         oTable.setProperty("selectionMode", "None");
 
         TableUtils.Hook.deregister(
-            oTable,
-            TableUtils.Hook.Keys.Table.RowsBound,
-            this._onRowsBound,
-            this
+            oTable, TableUtils.Hook.Keys.Table.RowsBound, this._onRowsBound, this
         );
-
         TableUtils.Hook.deregister(
-            oTable,
-            TableUtils.Hook.Keys.Table.RowsUnbound,
-            this._onRowsUnbound,
-            this
+            oTable, TableUtils.Hook.Keys.Table.RowsUnbound, this._onRowsUnbound, this
+        );
+        TableUtils.Hook.deregister(
+            oTable, TableUtils.Hook.Keys.Table.UpdateRows, this._onUpdateRows, this
         );
 
         const oBinding = oTable.getBinding("rows");
@@ -149,6 +167,7 @@ sap.ui.define([
 
     PersistSelectionPlugin.prototype.exit = function () {
         this._oSelectedPaths.clear();
+        this._bPendingSortFilterNotify = false;
     };
 
     // ─── Required abstract method implementations ─────────────────────────────
@@ -157,7 +176,7 @@ sap.ui.define([
      * Called by the table when a row is clicked or keyboard-toggled.
      * @param {sap.ui.table.Row} oRow
      * @param {boolean} bSelected
-     * @param {object} mConfig - { range: boolean } for shift+click range
+     * @param {object} [mConfig] - { range: boolean } for shift+click range selection
      */
     PersistSelectionPlugin.prototype.setSelected = function (oRow, bSelected, mConfig) {
         const oContext = oRow.getBindingContext();
@@ -166,31 +185,30 @@ sap.ui.define([
         }
 
         const sPath = oContext.getPath();
+        let bLimitReached = false;
 
         if (this.getSelectionMode() === "Single") {
-            // Single mode — replace entire selection
             this._oSelectedPaths.clear();
             if (bSelected) {
                 this._oSelectedPaths.add(sPath);
             }
         } else if (mConfig && mConfig.range) {
-            // Range selection (shift+click) — select all rows between last selected and this
             this._selectRange(oRow, bSelected);
             return; // _selectRange fires the event itself
         } else {
-            // MultiToggle — toggle this row
             if (bSelected) {
                 const iLimit = this.getLimit();
                 if (iLimit > 0 && this._oSelectedPaths.size >= iLimit) {
-                    return; // limit reached — ignore
+                    bLimitReached = true;
+                } else {
+                    this._oSelectedPaths.add(sPath);
                 }
-                this._oSelectedPaths.add(sPath);
             } else {
                 this._oSelectedPaths.delete(sPath);
             }
         }
 
-        this._fireSelectionChange("user");
+        this._fireSelectionChange("user", bLimitReached);
     };
 
     /**
@@ -207,28 +225,29 @@ sap.ui.define([
     };
 
     /**
-     * Called for the row drag ghost count and header selector state.
+     * Returns the number of selected rows. Used for drag ghost rendering.
      * @returns {int}
      */
     PersistSelectionPlugin.prototype.getSelectedCount = function () {
         return this._oSelectedPaths.size;
     };
 
-    // ─── Header selector (select all / deselect all) ──────────────────────────
+    // ─── Header selector ──────────────────────────────────────────────────────
 
     PersistSelectionPlugin.prototype.handleHeaderSelectorPress = function () {
         if (this._oSelectedPaths.size > 0) {
             this.clearSelection();
         } else {
-            this.selectAll();
+            return this.selectAll();
         }
         return Promise.resolve();
     };
 
     PersistSelectionPlugin.prototype.handleKeyboardShortcut = function (sType) {
         if (sType === "toggle") {
-            this.handleHeaderSelectorPress();
-        } else if (sType === "clear") {
+            return this.handleHeaderSelectorPress();
+        }
+        if (sType === "clear") {
             this.clearSelection();
         }
         return Promise.resolve();
@@ -238,7 +257,7 @@ sap.ui.define([
 
     /**
      * Returns the binding context paths of all selected rows.
-     * These paths remain stable across sort and filter operations.
+     * Stable across sort and filter for OData models.
      * @returns {string[]}
      */
     PersistSelectionPlugin.prototype.getSelectedContextPaths = function () {
@@ -246,9 +265,9 @@ sap.ui.define([
     };
 
     /**
-     * Returns the current row indices of selected rows.
-     * Note: these indices change after sort/filter — use getSelectedContextPaths()
-     * for stable references.
+     * Returns the current row indices of selected rows that are currently visible.
+     * These indices change after sort/filter — use getSelectedContextPaths() for
+     * a stable reference.
      * @returns {int[]}
      */
     PersistSelectionPlugin.prototype.getSelectedIndices = function () {
@@ -268,7 +287,8 @@ sap.ui.define([
 
     /**
      * Programmatically select rows by their binding context paths.
-     * @param {string|string[]} vPaths - Single path or array of paths
+     * Replaces the current selection.
+     * @param {string|string[]} vPaths
      */
     PersistSelectionPlugin.prototype.setSelectedContextPaths = function (vPaths) {
         const aPaths = Array.isArray(vPaths) ? vPaths : [vPaths];
@@ -276,7 +296,7 @@ sap.ui.define([
         aPaths.forEach(function (sPath) {
             this._oSelectedPaths.add(sPath);
         }, this);
-        this._fireSelectionChange("user");
+        this._fireSelectionChange("programmatic", false);
     };
 
     /**
@@ -287,34 +307,63 @@ sap.ui.define([
             return;
         }
         this._oSelectedPaths.clear();
-        this._fireSelectionChange("user");
+        this._fireSelectionChange("programmatic", false);
     };
 
     /**
-     * Selects all currently visible rows.
-     * For large datasets, consider using setSelectedContextPaths() with fetched contexts.
+     * Selects all rows in the binding — not just visible rows.
+     * Uses TableUtils.loadContexts to fetch all contexts asynchronously,
+     * so this works correctly for large OData datasets.
+     * @returns {Promise<void>}
      */
     PersistSelectionPlugin.prototype.selectAll = function () {
         if (this.getSelectionMode() === "Single") {
-            return;
+            return Promise.resolve();
         }
+
         const oTable = this.getControl();
         if (!oTable) {
-            return;
+            return Promise.resolve();
         }
-        oTable.getRows().forEach(function (oRow) {
-            const oContext = oRow.getBindingContext();
-            if (oContext) {
-                this._oSelectedPaths.add(oContext.getPath());
-            }
-        }, this);
-        this._fireSelectionChange("user");
+
+        const oBinding = oTable.getBinding("rows");
+        if (!oBinding) {
+            return Promise.resolve();
+        }
+
+        const iTotalCount = oBinding.getLength ? oBinding.getLength() : 0;
+        if (iTotalCount === 0) {
+            return Promise.resolve();
+        }
+
+        // Use TableUtils.loadContexts to fetch ALL contexts — not just visible rows.
+        // This is the same approach used internally by MultiSelectionPlugin.
+        return TableUtils.loadContexts(oTable, 0, iTotalCount, false)
+            .then(function (aContexts) {
+                if (!aContexts) {
+                    return;
+                }
+                const iLimit = this.getLimit();
+                let bLimitReached = false;
+                aContexts.forEach(function (oContext, i) {
+                    if (!oContext) {
+                        return;
+                    }
+                    if (iLimit > 0 && i >= iLimit) {
+                        bLimitReached = true;
+                        return;
+                    }
+                    this._oSelectedPaths.add(oContext.getPath());
+                }, this);
+                this._fireSelectionChange("programmatic", bLimitReached);
+            }.bind(this));
     };
 
-    // ─── Binding event handlers ───────────────────────────────────────────────
+    // ─── Hook handlers ────────────────────────────────────────────────────────
 
     PersistSelectionPlugin.prototype._onRowsBound = function (oBinding) {
-        this._attachBinding(oBinding);
+        const oTable = this.getControl();
+        this._attachBinding(oTable, oBinding);
     };
 
     PersistSelectionPlugin.prototype._onRowsUnbound = function () {
@@ -325,7 +374,38 @@ sap.ui.define([
         }
     };
 
-    PersistSelectionPlugin.prototype._attachBinding = function (oBinding) {
+    /**
+     * Fired by TableUtils after rows have actually re-rendered.
+     * This is the correct moment to notify consumers about updated indices
+     * after a sort/filter — replaces the fragile setTimeout(0) approach.
+     */
+    PersistSelectionPlugin.prototype._onUpdateRows = function () {
+        if (this._bPendingSortFilterNotify && this._oSelectedPaths.size > 0) {
+            this._bPendingSortFilterNotify = false;
+            this._fireSelectionChange("sortFilter", false);
+        }
+    };
+
+    // ─── Binding attachment ───────────────────────────────────────────────────
+
+    PersistSelectionPlugin.prototype._attachBinding = function (oTable, oBinding) {
+        // Detect JSON model and warn — context paths are index-based for JSON
+        // so persistence across filter is limited.
+        const oModel = oTable.getModel(oTable.getBindingInfo("rows")?.model);
+        if (oModel?.isA?.("sap.ui.model.json.JSONModel")) {
+            this._bIsJsonModel = true;
+            Log.warning(
+                "PersistSelectionPlugin: JSONModel detected. Context paths for JSON models " +
+                "are index-based (/array/0, /array/1) and shift after filter. " +
+                "Selection persistence across filter is not guaranteed. " +
+                "Use an OData model for full persistence support.",
+                null,
+                LOGGER
+            );
+        } else {
+            this._bIsJsonModel = false;
+        }
+
         oBinding.attachChange(this._onBindingChange, this);
     };
 
@@ -334,25 +414,23 @@ sap.ui.define([
     };
 
     /**
-     * Handles binding change events (sort, filter, refresh, etc.)
-     * Unlike standard plugins, we do NOT clear selection on sort/filter.
-     * We re-fire the selectionChange event with updated indices after
-     * the binding update so consumers stay in sync.
+     * Handles binding change events.
+     * On sort/filter: does NOT clear selection (unlike standard plugins).
+     * Sets a flag so _onUpdateRows fires selectionChange after re-render.
      */
     PersistSelectionPlugin.prototype._onBindingChange = function (oEvent) {
         const sReason = oEvent.getParameter("reason");
         if (sReason === "sort" || sReason === "filter") {
-            // Selection paths are still valid — just notify with updated indices
-            // Small delay to let the table rows re-render with new binding data
-            setTimeout(function () {
-                if (this._oSelectedPaths.size > 0) {
-                    this._fireSelectionChange("sortFilter");
-                }
-            }.bind(this), 0);
+            if (this._oSelectedPaths.size > 0) {
+                // Mark pending — the actual notification fires in _onUpdateRows
+                // once the table has re-rendered with the new binding data.
+                // This is more reliable than setTimeout(0).
+                this._bPendingSortFilterNotify = true;
+            }
         }
     };
 
-    // ─── Range selection helper ───────────────────────────────────────────────
+    // ─── Range selection ──────────────────────────────────────────────────────
 
     PersistSelectionPlugin.prototype._selectRange = function (oEndRow, bSelected) {
         const oTable = this.getControl();
@@ -363,22 +441,24 @@ sap.ui.define([
         const iEndIndex = oEndRow.getIndex();
         const aRows = oTable.getRows();
 
-        // Find the last selected row index as the range start
-        let iStartIndex = iEndIndex;
-        let iLastSelectedIndex = -1;
+        // Find the anchor: the closest already-selected row before the end row
+        let iAnchorIndex = iEndIndex;
+        let iClosestSelectedIndex = -1;
         aRows.forEach(function (oRow) {
             const oContext = oRow.getBindingContext();
             if (oContext && this._oSelectedPaths.has(oContext.getPath())) {
                 const idx = oRow.getIndex();
-                if (idx < iEndIndex && idx > iLastSelectedIndex) {
-                    iLastSelectedIndex = idx;
-                    iStartIndex = idx;
+                if (idx !== iEndIndex && idx > iClosestSelectedIndex) {
+                    iClosestSelectedIndex = idx;
+                    iAnchorIndex = idx;
                 }
             }
         }, this);
 
-        const iFrom = Math.min(iStartIndex, iEndIndex);
-        const iTo   = Math.max(iStartIndex, iEndIndex);
+        const iFrom = Math.min(iAnchorIndex, iEndIndex);
+        const iTo   = Math.max(iAnchorIndex, iEndIndex);
+        const iLimit = this.getLimit();
+        let bLimitReached = false;
 
         aRows.forEach(function (oRow) {
             const iIdx = oRow.getIndex();
@@ -386,6 +466,10 @@ sap.ui.define([
                 const oContext = oRow.getBindingContext();
                 if (oContext) {
                     if (bSelected) {
+                        if (iLimit > 0 && this._oSelectedPaths.size >= iLimit) {
+                            bLimitReached = true;
+                            return;
+                        }
                         this._oSelectedPaths.add(oContext.getPath());
                     } else {
                         this._oSelectedPaths.delete(oContext.getPath());
@@ -394,16 +478,17 @@ sap.ui.define([
             }
         }, this);
 
-        this._fireSelectionChange("user");
+        this._fireSelectionChange("user", bLimitReached);
     };
 
     // ─── Internal helpers ─────────────────────────────────────────────────────
 
-    PersistSelectionPlugin.prototype._fireSelectionChange = function (sTrigger) {
+    PersistSelectionPlugin.prototype._fireSelectionChange = function (sTrigger, bLimitReached) {
         this.fireSelectionChange({
             contextPaths: this.getSelectedContextPaths(),
             rowIndices:   this.getSelectedIndices(),
-            trigger:      sTrigger || "user"
+            trigger:      sTrigger || "user",
+            limitReached: !!bLimitReached
         });
     };
 
