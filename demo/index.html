@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PersistSelectionPlugin — Live Demo</title>
+
+<script src="https://sdk.openui5.org/resources/sap-ui-core.js"
+    id="sap-ui-bootstrap"
+    data-sap-ui-theme="sap_horizon"
+    data-sap-ui-libs="sap.ui.table,sap.m,sap.ui.layout"
+    data-sap-ui-resourceroots='{"com.abhilashbiradar": "../src"}'
+    data-sap-ui-async="true"
+    data-sap-ui-oninit="module:demo/app">
+</script>
+
+<style>
+    body {
+        margin: 0;
+        font-family: "72", "72full", Arial, Helvetica, sans-serif;
+        background: #f5f6f7;
+    }
+    .demo-header {
+        background: #0a6ed1;
+        color: #fff;
+        padding: 20px 32px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .demo-header h1 { margin: 0; font-size: 1.3rem; font-weight: 600; }
+    .demo-header a  { color: #fff; font-size: .85rem; opacity: .85; text-decoration: none; }
+    .demo-header a:hover { opacity: 1; }
+    .demo-body  { padding: 24px 32px; max-width: 1100px; margin: 0 auto; }
+    .demo-desc  { background: #fff; border: 1px solid #d9d9d9; border-radius: 8px; padding: 18px 24px; margin-bottom: 20px; }
+    .demo-desc h2 { font-size: 1rem; font-weight: 600; margin: 0 0 8px; color: #32363a; }
+    .demo-desc p  { margin: 0; font-size: .875rem; color: #556b82; line-height: 1.6; }
+    .demo-desc code { background: #f0f4f8; padding: 2px 6px; border-radius: 4px; font-size: .8rem; }
+    .badge-row  { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+    .badge      { font-size: .75rem; padding: 3px 10px; border-radius: 20px; font-weight: 500; }
+    .badge-blue { background: #e8f1fb; color: #0a6ed1; border: 1px solid #b3d0f7; }
+    .badge-green{ background: #f1fdf6; color: #0f8a3c; border: 1px solid #9de0b2; }
+    .demo-toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+    .demo-toolbar input {
+        padding: 7px 12px; border: 1px solid #bcc3ca; border-radius: 6px;
+        font-size: .875rem; width: 200px; outline: none;
+    }
+    .demo-toolbar input:focus { border-color: #0a6ed1; }
+    .demo-btn {
+        padding: 7px 16px; border-radius: 6px; font-size: .8rem; cursor: pointer;
+        border: 1px solid #bcc3ca; background: #fff; transition: all .15s;
+    }
+    .demo-btn:hover { background: #f0f4f8; border-color: #0a6ed1; color: #0a6ed1; }
+    .demo-btn.primary { background: #0a6ed1; color: #fff; border-color: #0a6ed1; }
+    .demo-btn.primary:hover { background: #085caf; }
+    .demo-btn.danger  { background: #fff; color: #bb0000; border-color: #bb0000; }
+    .demo-panel { background: #fff; border: 1px solid #d9d9d9; border-radius: 8px; overflow: hidden; }
+    #selection-status {
+        background: #f0f4f8; border: 1px solid #d9d9d9; border-radius: 6px;
+        padding: 12px 16px; margin-top: 14px; font-size: .82rem; color: #32363a;
+        min-height: 48px;
+    }
+    #selection-status strong { color: #0a6ed1; }
+</style>
+</head>
+<body>
+
+<div class="demo-header">
+    <h1>PersistSelectionPlugin — Live Demo</h1>
+    <div style="display:flex;gap:20px">
+        <a href="https://github.com/AbhilashBiradar/ui5-plugin-persist-selection" target="_blank">⭐ GitHub</a>
+        <a href="https://www.npmjs.com/package/ui5-plugin-persist-selection" target="_blank">📦 npm</a>
+    </div>
+</div>
+
+<div class="demo-body">
+
+    <div class="demo-desc">
+        <h2>What this demo shows</h2>
+        <p>
+            Select one or more rows. Then <strong>sort any column</strong> or <strong>type in the filter box</strong>.
+            With a standard <code>MultiSelectionPlugin</code>, your selections would be lost.
+            With <code>PersistSelectionPlugin</code>, they are preserved — because selections are
+            tracked by <strong>binding context path</strong>, not by row index.
+        </p>
+        <div class="badge-row">
+            <span class="badge badge-green">✓ Selection survives sort</span>
+            <span class="badge badge-green">✓ Selection survives filter</span>
+            <span class="badge badge-blue">Context-path based</span>
+            <span class="badge badge-blue">sap.ui.table.Table</span>
+            <span class="badge badge-blue">UI5 ≥ 1.64</span>
+        </div>
+    </div>
+
+    <div class="demo-toolbar">
+        <input type="search" id="name-filter" placeholder="Filter by name…" oninput="window.applyFilter(this.value)"/>
+        <button class="demo-btn" onclick="window.clearFilter()">Clear Filter</button>
+        <button class="demo-btn" onclick="window.sortByName()">Sort by Name ↕</button>
+        <button class="demo-btn" onclick="window.sortByDept()">Sort by Dept ↕</button>
+        <button class="demo-btn primary" onclick="window.selectAll()">Select All</button>
+        <button class="demo-btn danger"  onclick="window.clearSelection()">Clear Selection</button>
+    </div>
+
+    <div class="demo-panel" id="table-container"></div>
+
+    <div id="selection-status">No rows selected.</div>
+
+</div>
+
+<script>
+sap.ui.define("demo/app", [
+    "sap/ui/table/Table",
+    "sap/ui/table/Column",
+    "sap/m/Text",
+    "sap/m/Label",
+    "sap/ui/model/json/JSONModel",
+    "sap/ui/model/Filter",
+    "sap/ui/model/FilterOperator",
+    "sap/ui/model/Sorter",
+    "com.abhilashbiradar/PersistSelectionPlugin"
+], function (Table, Column, Text, Label, JSONModel, Filter, FilterOperator, Sorter, PersistSelectionPlugin) {
+    "use strict";
+
+    const aData = [
+        { id: 1,  name: "Alice Johnson",   dept: "Engineering",  role: "Senior Engineer",   salary: 95000, active: true  },
+        { id: 2,  name: "Bob Martinez",    dept: "Product",      role: "Product Manager",   salary: 88000, active: true  },
+        { id: 3,  name: "Charlie Wang",    dept: "Engineering",  role: "Tech Lead",         salary: 110000,active: true  },
+        { id: 4,  name: "Diana Patel",     dept: "Design",       role: "UX Designer",       salary: 82000, active: true  },
+        { id: 5,  name: "Eve Thompson",    dept: "Engineering",  role: "Junior Engineer",   salary: 72000, active: false },
+        { id: 6,  name: "Frank Lee",       dept: "Sales",        role: "Account Executive", salary: 78000, active: true  },
+        { id: 7,  name: "Grace Kim",       dept: "HR",           role: "HR Manager",        salary: 85000, active: true  },
+        { id: 8,  name: "Henry Brown",     dept: "Engineering",  role: "DevOps Engineer",   salary: 92000, active: true  },
+        { id: 9,  name: "Iris Chen",       dept: "Product",      role: "Product Owner",     salary: 91000, active: true  },
+        { id: 10, name: "Jack Wilson",     dept: "Design",       role: "UI Designer",       salary: 79000, active: false },
+        { id: 11, name: "Karen Davis",     dept: "Engineering",  role: "QA Engineer",       salary: 80000, active: true  },
+        { id: 12, name: "Liam Singh",      dept: "Sales",        role: "Sales Lead",        salary: 95000, active: true  },
+        { id: 13, name: "Maya Robinson",   dept: "Engineering",  role: "Architect",         salary: 125000,active: true  },
+        { id: 14, name: "Nathan Gupta",    dept: "HR",           role: "Recruiter",         salary: 68000, active: true  },
+        { id: 15, name: "Olivia Scott",    dept: "Product",      role: "BA",                salary: 77000, active: false }
+    ];
+
+    const oModel = new JSONModel({ employees: aData });
+
+    const oPlugin = new PersistSelectionPlugin({
+        selectionMode: "MultiToggle",
+        selectionChange: function (oEvent) {
+            const aPaths   = oEvent.getParameter("contextPaths");
+            const sTrigger = oEvent.getParameter("trigger");
+            const bLimit   = oEvent.getParameter("limitReached");
+
+            if (aPaths.length === 0) {
+                document.getElementById("selection-status").innerHTML = "No rows selected.";
+                return;
+            }
+
+            // Resolve names from paths
+            const aNames = aPaths.map(function (sPath) {
+                const oCtx = oModel.createBindingContext(sPath);
+                return oCtx ? oCtx.getProperty("name") : sPath;
+            });
+
+            const sTriggerLabel = {
+                user:          "user click",
+                sortFilter:    "sort / filter (selection preserved ✓)",
+                programmatic:  "programmatic"
+            }[sTrigger] || sTrigger;
+
+            document.getElementById("selection-status").innerHTML =
+                "<strong>" + aPaths.length + " row(s) selected</strong>" +
+                " &nbsp;·&nbsp; Trigger: <em>" + sTriggerLabel + "</em>" +
+                (bLimit ? " &nbsp;<span style='color:#bb0000'>⚠ limit reached</span>" : "") +
+                "<br/><span style='color:#556b82'>" + aNames.join(", ") + "</span>";
+        }
+    });
+
+    const oTable = new Table({
+        visibleRowCount: 10,
+        selectionBehavior: "Row",
+        dependents: [oPlugin],
+        columns: [
+            new Column({
+                label: new Label({ text: "ID" }),
+                template: new Text({ text: "{id}" }),
+                width: "60px",
+                sortProperty: "id"
+            }),
+            new Column({
+                label: new Label({ text: "Name" }),
+                template: new Text({ text: "{name}" }),
+                width: "180px",
+                sortProperty: "name",
+                filterProperty: "name"
+            }),
+            new Column({
+                label: new Label({ text: "Department" }),
+                template: new Text({ text: "{dept}" }),
+                width: "140px",
+                sortProperty: "dept"
+            }),
+            new Column({
+                label: new Label({ text: "Role" }),
+                template: new Text({ text: "{role}" }),
+                width: "180px"
+            }),
+            new Column({
+                label: new Label({ text: "Salary (USD)" }),
+                template: new Text({ text: "{salary}" }),
+                width: "130px",
+                sortProperty: "salary",
+                hAlign: "Right"
+            }),
+            new Column({
+                label: new Label({ text: "Active" }),
+                template: new Text({ text: "{= ${active} ? 'Yes' : 'No'}" }),
+                width: "80px"
+            })
+        ]
+    });
+
+    oTable.setModel(oModel);
+    oTable.bindRows("/employees");
+    oTable.placeAt("table-container");
+
+    let bNameAsc  = true;
+    let bDeptAsc  = true;
+
+    window.applyFilter = function (sVal) {
+        const oBinding = oTable.getBinding("rows");
+        if (sVal) {
+            oBinding.filter([new Filter("name", FilterOperator.Contains, sVal)]);
+        } else {
+            oBinding.filter([]);
+        }
+    };
+
+    window.clearFilter = function () {
+        document.getElementById("name-filter").value = "";
+        oTable.getBinding("rows").filter([]);
+    };
+
+    window.sortByName = function () {
+        oTable.getBinding("rows").sort(new Sorter("name", !bNameAsc));
+        bNameAsc = !bNameAsc;
+    };
+
+    window.sortByDept = function () {
+        oTable.getBinding("rows").sort(new Sorter("dept", !bDeptAsc));
+        bDeptAsc = !bDeptAsc;
+    };
+
+    window.selectAll = function () {
+        oPlugin.selectAll();
+    };
+
+    window.clearSelection = function () {
+        oPlugin.clearSelection();
+    };
+});
+</script>
+</body>
+</html>
