@@ -1,18 +1,24 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8"/>
     <title>PersistSelectionPlugin — QUnit Tests</title>
-    <script src="https://openui5.hana.ondemand.com/resources/sap-ui-core.js"
-        id="sap-ui-bootstrap"
-        data-sap-ui-theme="sap_horizon"
-        data-sap-ui-libs="sap.ui.table"
-        data-sap-ui-resourceroots='{"com.abhilashbiradar": "../../src"}'
-        data-sap-ui-async="true">
+    <link rel="stylesheet" href="https://sdk.openui5.org/resources/sap/ui/thirdparty/qunit-2.css"/>
+    <script>
+        window["sap-ui-config"] = {
+            libs: "sap.ui.table,sap.m",
+            theme: "sap_horizon",
+            async: false,
+            resourceRoots: {
+                "plugin": "../src",
+                "test": "./"
+            }
+        };
     </script>
-    <link rel="stylesheet" href="https://openui5.hana.ondemand.com/resources/sap/ui/thirdparty/qunit-2.css"/>
-    <script src="https://openui5.hana.ondemand.com/resources/sap/ui/thirdparty/qunit-2.js"></script>
-    <script src="PersistSelectionPlugin.qunit.js"></script>
+    <script src="https://sdk.openui5.org/resources/sap-ui-core.js"></script>
+    <script>
+        sap.ui.require(["test/PersistSelectionPlugin.qunit"]);
+    </script>
 </head>
 <body>
     <div id="qunit"></div>

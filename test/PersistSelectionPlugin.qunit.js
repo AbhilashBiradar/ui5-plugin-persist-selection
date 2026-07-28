@@ -1,24 +1,27 @@
-/* global QUnit */
-sap.ui.define([
-    "com.abhilashbiradar/PersistSelectionPlugin",
+
+function mockRow(sPath, iIndex) {
+    return {
+        getBindingContext: function () { return { getPath: function () { return sPath; } }; },
+        getIndex: function () { return iIndex; }
+    };
+}
+
+sap.ui.define("test/PersistSelectionPlugin.qunit", [
+    "plugin/PersistSelectionPlugin",
     "sap/ui/table/Table",
     "sap/ui/table/Column",
     "sap/ui/model/json/JSONModel",
-    "sap/ui/model/Filter",
-    "sap/ui/model/FilterOperator",
-    "sap/ui/model/Sorter"
+    "sap/ui/thirdparty/qunit-2"
 ], function (
     PersistSelectionPlugin,
     Table,
     Column,
-    JSONModel,
-    Filter,
-    FilterOperator,
-    Sorter
+    JSONModel
 ) {
     "use strict";
 
-    // ─── Helpers ──────────────────────────────────────────────────────────────
+    /* eslint-disable no-undef */
+    const QUnit = window.QUnit;
 
     function createTableWithPlugin(mPluginSettings) {
         const oPlugin = new PersistSelectionPlugin(mPluginSettings || {});
@@ -47,15 +50,6 @@ sap.ui.define([
         sap.ui.getCore().applyChanges();
 
         return { oTable, oPlugin };
-    }
-
-    function mockRow(sPath, iIndex) {
-        return {
-            getBindingContext: function () {
-                return { getPath: function () { return sPath; } };
-            },
-            getIndex: function () { return iIndex; }
-        };
     }
 
     // ─── Module: Core selection logic ─────────────────────────────────────────
