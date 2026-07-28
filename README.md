@@ -3,6 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/ui5-plugin-persist-selection)](https://www.npmjs.com/package/ui5-plugin-persist-selection)
 [![license](https://img.shields.io/github/license/AbhilashBiradar/ui5-plugin-persist-selection)](./LICENSE)
 [![tests](https://img.shields.io/badge/tests-17%20passed-brightgreen)](./test/index.html)
+[![demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-blue)](https://abhilashbiradar.github.io/ui5-plugin-persist-selection/demo/index.html)
+
+> **[▶ Live Demo](https://abhilashbiradar.github.io/ui5-plugin-persist-selection/demo/index.html)** — Select rows, sort or filter, selections persist.
 
 > A `sap.ui.table.Table` selection plugin that **preserves row selections across sort and filter operations** — by tracking binding context paths instead of row indices.
 
